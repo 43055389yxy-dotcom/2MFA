@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'MFA 配置转换 | ITMS',
-  description: '在浏览器本地安全地转换与解析 TOTP MFA 配置。',
+  title: 'MFA 动态验证码 | ITMS',
+  description: '输入 MFA 密钥，在浏览器本地生成动态验证码。',
 };
 
 export default function RootLayout({

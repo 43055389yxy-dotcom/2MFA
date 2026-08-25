@@ -1,0 +1,14 @@
+.git
+.gitignore
+node_modules
+dist
+.next
+.vinext
+.wrangler
+outputs
+work
+.env
+.env.*
+npm-debug.log*
+.DS_Store
+README.local.md
