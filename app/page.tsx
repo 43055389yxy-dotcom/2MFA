@@ -2,9 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-type HistoryItem = { secret: string; lastUsed: number };
+type HistoryItem = { secret: string; lastUsed: number; note: string };
 const STORAGE_KEY = 'itms-mfa-history-v1';
 const PERIOD = 30;
+
+function persistHistory(items: HistoryItem[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+}
 
 function cleanSecret(value: string) {
   return value.toUpperCase().replace(/[^A-Z2-7]/g, '');
@@ -70,8 +74,17 @@ export default function Home() {
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      if (Array.isArray(stored)) setHistory(stored.slice(0, 8));
-    } catch { localStorage.removeItem(STORAGE_KEY); }
+      if (Array.isArray(stored)) {
+        // 历史记录来自浏览器持久化存储，需要在客户端挂载后同步一次。
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setHistory(stored.flatMap((item) => {
+          if (!item || typeof item.secret !== 'string' || typeof item.lastUsed !== 'number') return [];
+          return [{ secret: item.secret, lastUsed: item.lastUsed, note: typeof item.note === 'string' ? item.note : '' }];
+        }));
+      }
+    } catch {
+      // 保留原始数据，避免一次异常解析导致历史记录被删除。
+    }
   }, []);
 
   const refresh = useCallback(async () => {
@@ -82,16 +95,20 @@ export default function Home() {
   }, [secret]);
 
   useEffect(() => {
-    refresh();
+    const initialTimer = window.setTimeout(refresh, 0);
     const timer = window.setInterval(refresh, 1000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
   }, [refresh]);
 
   function saveToHistory(value = secret) {
     if (!otp || value.length < 16) return;
     setHistory((current) => {
-      const next = [{ secret: value, lastUsed: Date.now() }, ...current.filter((item) => item.secret !== value)].slice(0, 8);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      const existing = current.find((item) => item.secret === value);
+      const next = [{ secret: value, lastUsed: Date.now(), note: existing?.note || '' }, ...current.filter((item) => item.secret !== value)];
+      persistHistory(next);
       return next;
     });
   }
@@ -104,21 +121,20 @@ export default function Home() {
     window.setTimeout(() => setCopied(false), 1400);
   }
 
-  function useHistory(item: HistoryItem) {
+  function selectHistory(item: HistoryItem) {
     setSecret(item.secret);
     setHistory((current) => {
       const next = [{ ...item, lastUsed: Date.now() }, ...current.filter((entry) => entry.secret !== item.secret)];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      persistHistory(next);
       return next;
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function deleteHistory(event: React.MouseEvent, item: HistoryItem) {
-    event.stopPropagation();
+  function updateNote(secretValue: string, note: string) {
     setHistory((current) => {
-      const next = current.filter((entry) => entry.secret !== item.secret);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      const next = current.map((entry) => entry.secret === secretValue ? { ...entry, note } : entry);
+      persistHistory(next);
       return next;
     });
   }
@@ -178,18 +194,30 @@ export default function Home() {
       </section>
 
       <section className="history-section">
-        <div className="history-heading"><div><span className="history-icon">↻</span><div><h2>历史 MFA</h2><p>保存在此设备，点击即可再次使用</p></div></div>{history.length > 0 && <button onClick={() => { localStorage.removeItem(STORAGE_KEY); setHistory([]); }}>清空记录</button>}</div>
+        <div className="history-heading"><div><span className="history-icon">↻</span><div><h2>历史 MFA</h2><p>长期保存在此设备，可添加客户或账号备注</p></div></div>{history.length > 0 && <span className="history-count">{history.length} 条记录</span>}</div>
         {history.length === 0 ? (
           <div className="empty-history"><span>◇</span><p>使用过的 MFA 密钥会显示在这里</p></div>
         ) : (
           <div className="history-list">
             {history.map((item, index) => (
-              <button className={item.secret === secret ? 'history-item active' : 'history-item'} key={item.secret} onClick={() => useHistory(item)}>
-                <span className="item-index">{String(index + 1).padStart(2, '0')}</span>
-                <span className="item-copy"><b>{maskSecret(item.secret)}</b><small>{formatTime(item.lastUsed)}</small></span>
-                <span className="reuse">使用 <b>→</b></span>
-                <span className="delete" onClick={(event) => deleteHistory(event, item)} role="button" aria-label="删除此记录">×</span>
-              </button>
+              <article className={item.secret === secret ? 'history-item active' : 'history-item'} key={item.secret}>
+                <button className="history-main" onClick={() => selectHistory(item)} aria-label={`再次使用 ${item.note || maskSecret(item.secret)}`}>
+                  <span className="item-index">{String(index + 1).padStart(2, '0')}</span>
+                  <span className="item-copy"><b>{maskSecret(item.secret)}</b><small>{formatTime(item.lastUsed)}</small></span>
+                  <span className="reuse">使用 <b>→</b></span>
+                </button>
+                <label className="note-field">
+                  <span>备注</span>
+                  <input
+                    value={item.note}
+                    onChange={(event) => updateNote(item.secret, event.target.value)}
+                    placeholder="填写客户名称或账号 ID"
+                    maxLength={80}
+                    aria-label={`${maskSecret(item.secret)} 的备注`}
+                  />
+                  <i>{item.note ? '已保存' : '自动保存'}</i>
+                </label>
+              </article>
             ))}
           </div>
         )}
