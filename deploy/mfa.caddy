@@ -1,4 +1,4 @@
-mfa.tontiancloud.com {
+mfa.tontianit.com {
     encode zstd gzip
 
     header {
