@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
 type HistoryItem = { secret: string; lastUsed: number; note: string };
-const STORAGE_KEY = 'itms-mfa-history-v1';
+const LEGACY_STORAGE_KEY = 'itms-mfa-history-v1';
+const SESSION_STORAGE_KEY = 'itms-mfa-session-history-v1';
 const PERIOD = 30;
 
 function persistHistory(items: HistoryItem[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(items));
 }
 
 function cleanSecret(value: string) {
@@ -73,17 +74,24 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      const stored = JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY) || legacy || '[]');
+      // 旧版本曾把完整 MFA 密钥长期保存在 localStorage。升级后立即清除，
+      // 只在当前标签页的 sessionStorage 中临时保留，关闭标签页后由浏览器清空。
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
       if (Array.isArray(stored)) {
-        // 历史记录来自浏览器持久化存储，需要在客户端挂载后同步一次。
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setHistory(stored.flatMap((item) => {
+        const normalized = stored.flatMap((item) => {
           if (!item || typeof item.secret !== 'string' || typeof item.lastUsed !== 'number') return [];
-          return [{ secret: item.secret, lastUsed: item.lastUsed, note: typeof item.note === 'string' ? item.note : '' }];
-        }));
+          return [{ secret: cleanSecret(item.secret), lastUsed: item.lastUsed, note: typeof item.note === 'string' ? item.note : '' }];
+        }).filter((item) => item.secret.length >= 16);
+        persistHistory(normalized);
+        // 历史记录来自当前标签页的临时存储，需要在客户端挂载后同步一次。
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setHistory(normalized);
       }
     } catch {
-      // 保留原始数据，避免一次异常解析导致历史记录被删除。
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
     }
   }, []);
 
@@ -194,9 +202,9 @@ export default function Home() {
       </section>
 
       <section className="history-section">
-        <div className="history-heading"><div><span className="history-icon">↻</span><div><h2>历史 MFA</h2><p>长期保存在此设备，可添加客户或账号备注</p></div></div>{history.length > 0 && <span className="history-count">{history.length} 条记录</span>}</div>
+        <div className="history-heading"><div><span className="history-icon">↻</span><div><h2>本次会话 MFA</h2><p>仅在当前标签页临时保存，关闭标签页后自动清空</p></div></div>{history.length > 0 && <span className="history-count">{history.length} 条记录</span>}</div>
         {history.length === 0 ? (
-          <div className="empty-history"><span>◇</span><p>使用过的 MFA 密钥会显示在这里</p></div>
+          <div className="empty-history"><span>◇</span><p>当前标签页使用过的 MFA 密钥会显示在这里</p></div>
         ) : (
           <div className="history-list">
             {history.map((item, index) => (
